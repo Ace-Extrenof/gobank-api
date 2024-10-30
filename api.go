@@ -43,6 +43,7 @@ func (s *APIServer) Run() {
     router.HandleFunc("/account", makeHTTPHandler(s.handleAccount))
     router.HandleFunc("/account/{id}", makeHTTPHandler(s.handleGetAccount)).Methods("GET")
     router.HandleFunc("/account/{id}", makeHTTPHandler(s.handleDeleteAccount)).Methods("DELETE")
+    router.HandleFunc("/account/{id}/balance", makeHTTPHandler(s.handleBalance)).Methods("PATCH")
 
     log.Println("api server listening on -> ", s.listenAddr)
 
@@ -120,9 +121,47 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
     return fmt.Errorf("method not allowed %s", r.Method)
 }
 
-// TODO
 func (s *APIServer) handleBalance(w http.ResponseWriter, r *http.Request) error {
-    return nil
+    vars := mux.Vars(r)
+
+    idStr := vars["id"]
+
+    var id int
+    _, err := fmt.Sscanf(idStr, "%d", &id)
+    if err != nil {
+        return fmt.Errorf("invalid account ID: %s", idStr)
+    }
+
+    filePath := filepath.Join("db", fmt.Sprintf("%d.json", id))
+
+    data, err := os.ReadFile(filePath)
+    if os.IsNotExist(err) {
+        return fmt.Errorf("account not found: %d", id)
+    } else if err != nil {
+        return fmt.Errorf("could not read account file: %w", err)
+    }
+
+    var account Account
+    if err := json.Unmarshal(data, &account); err != nil {
+        return fmt.Errorf("could not decode account: %w", err)
+    }
+
+    var requestBody struct {
+        Amount int `json:"amount"`
+    }
+
+    if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+            return fmt.Errorf("could not decode request body: %w", err)
+    }
+
+    account.Balance += int64(requestBody.Amount)
+    if err := SaveAccount(&account); err != nil {
+        return fmt.Errorf("could not update account_%d: %w", account.ID, err)
+    }
+
+    log.Printf("added %d to account_%d successfully", requestBody.Amount, id)
+
+    return WriteJSON(w, http.StatusOK, account)
 }
 
 
