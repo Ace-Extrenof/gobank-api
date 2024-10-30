@@ -40,8 +40,9 @@ func NewServer(listenAddr string) *APIServer {
 func (s *APIServer) Run() {
     router := mux.NewRouter()
 
-    router.HandleFunc("/account", makeHTTPHandler(s.handleAccount)).Methods("POST", "DELETE")
+    router.HandleFunc("/account", makeHTTPHandler(s.handleAccount))
     router.HandleFunc("/account/{id}", makeHTTPHandler(s.handleGetAccount)).Methods("GET")
+    router.HandleFunc("/account/{id}", makeHTTPHandler(s.handleDeleteAccount)).Methods("DELETE")
 
     log.Println("api server listening on -> ", s.listenAddr)
 
@@ -119,6 +120,7 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
     return fmt.Errorf("method not allowed %s", r.Method)
 }
 
+// TODO
 func (s *APIServer) handleBalance(w http.ResponseWriter, r *http.Request) error {
     return nil
 }
@@ -172,5 +174,27 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter) error {
 }
 
 func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error {
-    return nil
+    vars := mux.Vars(r)
+
+    idStr := vars["id"]
+
+    var id int
+    _, err := fmt.Sscanf(idStr, "%d", &id)
+    if err != nil {
+        return fmt.Errorf("invalid account ID: %s", idStr)
+    }
+
+    filePath := filepath.Join("db", fmt.Sprintf("%d.json", id))
+
+    if _, err := os.Stat(filePath); os.IsNotExist(err) {
+        return fmt.Errorf("account not found: %w", err)
+    } else if  err != nil {
+        return fmt.Errorf("could not read file: %w", err)
+    }
+
+    if err := os.Remove(filePath); err != nil {
+        return fmt.Errorf("could not remove file: %w", err)
+    }
+
+    return WriteJSON(w, http.StatusOK, ApiError{Error: fmt.Sprintf("account %d deleted successfully", id)})
 }
