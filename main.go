@@ -1,7 +1,7 @@
 package main
 
 func main() {
-    server := NewServer(":6969")
+    server := NewServer(":8000")
 
     server.Run()
 }

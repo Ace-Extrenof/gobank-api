@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/gorilla/mux"
 )
@@ -38,7 +40,8 @@ func NewServer(listenAddr string) *APIServer {
 func (s *APIServer) Run() {
     router := mux.NewRouter()
 
-    router.HandleFunc("/account", makeHTTPHandler(s.handleAccount))
+    router.HandleFunc("/account", makeHTTPHandler(s.handleAccount)).Methods("POST", "DELETE")
+    router.HandleFunc("/account/{id}", makeHTTPHandler(s.handleGetAccount)).Methods("GET")
 
     log.Println("api server listening on -> ", s.listenAddr)
 
@@ -55,6 +58,51 @@ func makeHTTPHandler(f apiFunc) http.HandlerFunc {
     }
 }
 
+func SaveAccount(account *Account) error {
+    if err := os.MkdirAll("db", os.ModePerm); err != nil {
+        return err
+    }
+
+    filePath := filepath.Join("db", fmt.Sprintf("%d.json", account.ID))
+    file, err := os.Create(filePath)
+
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+
+    return json.NewEncoder(file).Encode(account)
+}
+
+const idFilePath = "db/last_id.txt"
+
+func GetNextID() (int, error) {
+    var lastID int
+
+    if _, err := os.Stat(idFilePath); os.IsNotExist(err){
+        if err := os.WriteFile(idFilePath, []byte("0"), 0644); err != nil {
+            return 0, fmt.Errorf("could not create last_id.txt: %w", err)
+        }
+        lastID = 0
+    } else {
+        data, err := os.ReadFile(idFilePath)
+        if err != nil {
+            return 0, fmt.Errorf("could not read last_id.txt: %w", err)
+        }
+        if _, err := fmt.Sscanf(string(data), "%d", &lastID); err != nil {
+            return 0, fmt.Errorf("could not parse lastID: %w", err)
+        }
+    }
+
+    nextID := lastID + 1
+
+    if err := os.WriteFile(idFilePath, []byte(fmt.Sprintf("%d", nextID)), 0644); err != nil {
+        return 0, fmt.Errorf("could not write to last_id.txt %w", err)
+    }
+
+    return nextID, nil
+}
+
 // HELPERS
 
 func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error {
@@ -62,7 +110,7 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
         return s.handleGetAccount(w, r)
     }
     if r.Method == "POST" {
-        return s.handleCreateAccount(w, r)
+        return s.handleCreateAccount(w)
     }
     if r.Method == "DELETE" {
         return s.handleDeleteAccount(w, r)
@@ -77,13 +125,48 @@ func (s *APIServer) handleBalance(w http.ResponseWriter, r *http.Request) error 
 
 
 func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) error {
-    return nil
+    vars := mux.Vars(r)
+
+    idStr := vars["id"]
+
+    var id int
+    _, err := fmt.Sscanf(idStr, "%d", &id)
+    if err != nil {
+        return fmt.Errorf("invalid account ID: %s", idStr)
+    }
+
+    filePath := filepath.Join("db", fmt.Sprintf("%d.json", id))
+
+    data, err := os.ReadFile(filePath)
+    if os.IsNotExist(err) {
+        return fmt.Errorf("account not found: %d", id)
+    } else if err != nil {
+        return fmt.Errorf("could not read account file: %w", err)
+    }
+
+    var account Account
+    if err := json.Unmarshal(data, &account); err != nil {
+        return fmt.Errorf("could not decode account: %w", err)
+    }
+
+    return WriteJSON(w, http.StatusOK, account)
 }
 
-func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
-    account := NewAccount("BOOM", "Baby")
+func (s *APIServer) handleCreateAccount(w http.ResponseWriter) error {
+    id, err := GetNextID()
+    account := NewAccount(id, "BOOM", "Baby")
 
     log.Println(account)
+
+    if err != nil {
+        return fmt.Errorf("could not get next id: %v", err)
+    }
+
+    log.Printf("next id: %d", id)
+
+    if err := SaveAccount(account); err != nil {
+        return fmt.Errorf("couldn't save account: %w", err)
+    }
 
     return WriteJSON(w, http.StatusOK, account)
 }

@@ -10,7 +10,7 @@ type Account struct {
     Balance int64 `json:"balance"`
 }
 
-func NewAccount(firstName, lastName string) *Account {
+func NewAccount(id int, firstName, lastName string) *Account {
     return &Account{
         ID: rand.IntN(10000),
         Firstname: firstName,
